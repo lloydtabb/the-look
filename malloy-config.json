@@ -2,7 +2,8 @@
   "connections": {
     "the_look_bq": {
       "is": "bigquery",
-      "projectId": "advance-lacing-417917"
+      "projectId": "advance-lacing-417917",
+      "serviceAccountKey": {"env": "BIGQUERY_CREDENTIALS_JSON"}
     }
   },
   "malloyyo": {
