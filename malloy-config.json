@@ -2,7 +2,12 @@
   "connections": {
     "the_look_bq": {
       "is": "bigquery",
-      "projectId": "guildai-infra-shared"
+      "projectId": "advance-lacing-417917"
+    }
+  },
+  "malloyyo": {
+    "targets": {
+      "demo": { "url": "acme-demo.staging.malloyyo.com", "dataset": "the-look" }
     }
   }
 }
