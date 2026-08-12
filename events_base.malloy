@@ -1,0 +1,107 @@
+// events_base.malloy
+// NOT part of the LookML conversion -- the thelook_bq_lookml project has no events
+// view. Added because the funnel / conversion-rate / add-to-cart metrics in the
+// reference post are session-level web analytics, and this is the only table that
+// carries them.
+
+source: events_base is the_look_bq.table('bigquery-public-data.thelook_ecommerce.events') extend {
+  primary_key: id
+
+  //////////// Dimensions ////////////
+
+  // The genuinely monotonic funnel in this data. Checked against BigQuery:
+  // every one of the 680,485 sessions has a `product` event, while only 87,873
+  // have a `home` event -- so home/department are ENTRY VARIANTS, not stages
+  // above product. Charting them as a funnel would draw a rising staircase.
+  // Numbered so a categorical axis sorts in journey order.
+  dimension: funnel_stage is
+    pick '1 Product View' when event_type = 'product'
+    pick '2 Add to Cart' when event_type = 'cart'
+    pick '3 Purchase' when event_type = 'purchase'
+    else null::string
+
+  dimension: is_funnel_step is event_type ? 'product' | 'cart' | 'purchase'
+
+  // Where sessions come in, counted separately from the funnel.
+  dimension: entry_page is
+    pick 'Home' when event_type = 'home'
+    pick 'Department' when event_type = 'department'
+    else null::string
+
+  //////////// Measures ////////////
+
+  measure: event_count is count()
+
+  measure: session_count is count(session_id)
+
+  measure: visitor_count is count(user_id)
+
+  // One filtered session count per stage -- the funnel's rungs.
+  measure:
+    home_sessions is count(session_id) { where: event_type = 'home' }
+    department_sessions is count(session_id) { where: event_type = 'department' }
+    product_sessions is count(session_id) { where: event_type = 'product' }
+    cart_sessions is count(session_id) { where: event_type = 'cart' }
+    purchase_sessions is count(session_id) { where: event_type = 'purchase' }
+    cancel_sessions is count(session_id) { where: event_type = 'cancel' }
+
+  # percent
+  measure:
+    #" Sessions reaching purchase, out of all sessions
+    conversion_rate is purchase_sessions / nullif(session_count, 0)
+
+    #" Sessions that added to cart, out of all sessions
+    add_to_cart_rate is cart_sessions / nullif(session_count, 0)
+
+    #" Of the sessions that added to cart, the share that purchased
+    cart_to_purchase_rate is purchase_sessions / nullif(cart_sessions, 0)
+
+    #" Of the sessions that viewed a product, the share that added to cart
+    product_to_cart_rate is cart_sessions / nullif(product_sessions, 0)
+
+    #" Sessions that abandoned after adding to cart
+    cart_abandon_rate is
+      (cart_sessions - purchase_sessions) / nullif(cart_sessions, 0)
+
+  //////////// Views ////////////
+
+  # bar_chart { x=funnel_stage y=sessions }
+  view: funnel is {
+    group_by: funnel_stage
+    aggregate: sessions is count(session_id)
+    where: is_funnel_step
+    order_by: funnel_stage asc
+  }
+
+  # bar_chart { x=entry_page y=sessions }
+  view: entry_pages is {
+    group_by: entry_page
+    aggregate: sessions is count(session_id)
+    where: entry_page is not null
+    order_by: sessions desc
+  }
+
+  view: by_traffic_source is {
+    group_by: traffic_source
+    aggregate: session_count, add_to_cart_rate, conversion_rate
+    order_by: session_count desc
+  }
+
+  view: by_browser is {
+    group_by: browser
+    aggregate: session_count, add_to_cart_rate, conversion_rate
+    order_by: session_count desc
+  }
+
+  // The current month is always partial -- charting it draws a cliff that reads
+  // as collapse (and sends conversion_rate to a nonsense high). Cut at the start
+  // of the current month; the cutoff comes from the clock, not the result set, so
+  // it stays correct when the dashboard's filters narrow the data.
+  # line_chart { x=event_month y=session_count }
+  view: sessions_by_month is {
+    group_by: event_month is created_at.month
+    aggregate: session_count, conversion_rate
+    where: created_at < now.month
+    order_by: event_month asc
+  }
+}

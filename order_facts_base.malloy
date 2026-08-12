@@ -1,0 +1,54 @@
+// order_facts_base.malloy
+// Malloy translation of LookML view: order_facts (views/11_order_facts.view.lkml)
+//
+// In LookML this is a `derived_table` with `explore_source: order_items` -- an
+// aggregate-awareness rollup of the order_items explore to one row per order.
+// In Malloy a query IS a source, so the rollup is written directly as a query and
+// then extended with the dimensions LookML declared on top of it.
+
+import "order_items_base.malloy"
+import "inventory_items_base.malloy"
+
+// The rollup itself. order_cost / order_gross_margin need inventory_items.cost,
+// so the rollup joins it in exactly the way the LookML explore did.
+source: order_facts_rollup is order_items_base extend {
+  join_one: inventory_items is inventory_items_base
+    on inventory_item_id = inventory_items.id
+
+  // join_one, so the cost sums at the order_item grain (no fan-out to correct for)
+  measure:
+    order_cost_total is source.sum(inventory_items.cost)
+    gross_margin_total is sum(sale_price) - source.sum(inventory_items.cost)
+} -> {
+  group_by:
+    order_id
+    user_id
+  aggregate:
+    // In this dataset every item in an order carries its own created_at, so the
+    // LookML derived table's `column: created_at` would split one order into one
+    // row per item. Rolling the timestamp up to the order's first item keeps
+    // order_id a real primary key.
+    created_at is min(created_at)
+    items_in_order is count()
+    order_amount is sum(sale_price)
+    order_cost is order_cost_total
+    order_gross_margin is gross_margin_total
+}
+
+// LookML derived_column: RANK() OVER (PARTITION BY user_id ORDER BY created_at)
+source: order_facts_base is order_facts_rollup -> {
+  group_by:
+    order_id
+    user_id
+    created_at
+    items_in_order
+    order_amount
+    order_cost
+    order_gross_margin
+  calculate: order_sequence_number is
+    rank() { partition_by: user_id, order_by: created_at asc }
+} extend {
+  primary_key: order_id
+
+  dimension: is_first_purchase is order_sequence_number = 1
+}

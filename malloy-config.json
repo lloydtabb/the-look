@@ -1,0 +1,8 @@
+{
+  "connections": {
+    "the_look_bq": {
+      "is": "bigquery",
+      "projectId": "guildai-infra-shared"
+    }
+  }
+}

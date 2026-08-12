@@ -1,0 +1,64 @@
+// givens.malloy -- the dashboard filter controls.
+//
+// Declared once here, applied by each dashboard's `where:`. Dashboards bare-import
+// this file, which re-exports the sources too, so one import puts both the data and
+// the controls in scope.
+
+##! experimental { givens }
+
+import "index.malloy"
+
+given:
+  # label="Time period"
+  PERIOD :: filter<timestamp> is f''
+
+  # label="Country" suggest { query=country_suggest dimension=country_name }
+  COUNTRY :: filter<string> is f''
+
+  # label="Traffic source" control=multiselect suggest { query=traffic_source_suggest dimension=traffic_source }
+  TRAFFIC_SOURCE :: filter<string> is f''
+
+  # label="Brand" control=multiselect suggest { query=brand_suggest dimension=brand_name }
+  BRAND :: filter<string> is f''
+
+  # label="Category" control=multiselect suggest { query=category_suggest dimension=category_name }
+  CATEGORY :: filter<string> is f''
+
+// Option lists for the controls. Brand and Category reference each other's given
+// so the two narrow together (pick a category, the brand list follows).
+
+query: country_suggest is order_items -> {
+  group_by: country_name is users.country_name
+  aggregate: n is order_item_count
+  order_by: n desc
+  limit: 100
+}
+
+query: traffic_source_suggest is order_items -> {
+  group_by: traffic_source is users.traffic_source
+  aggregate: n is order_item_count
+  order_by: n desc
+  limit: 100
+}
+
+query: brand_suggest is order_items -> {
+  group_by: brand_name is products.brand_name
+  aggregate: n is order_item_count
+  where: products.category_name ~ $CATEGORY
+  order_by: n desc
+  limit: 500
+}
+
+query: category_suggest is order_items -> {
+  group_by: category_name is products.category_name
+  aggregate: n is order_item_count
+  where: products.brand_name ~ $BRAND
+  order_by: n desc
+  limit: 100
+}
+
+export {
+  order_items, events,
+  country_suggest, traffic_source_suggest, brand_suggest, category_suggest,
+  PERIOD, COUNTRY, TRAFFIC_SOURCE, BRAND, CATEGORY
+}

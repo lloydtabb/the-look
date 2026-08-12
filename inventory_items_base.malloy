@@ -1,0 +1,64 @@
+// inventory_items_base.malloy
+// Malloy translation of LookML view: inventory_items (views/03_inventory_items.view.lkml)
+//
+// LookML's stock_coverage_ratio depends on order_items.count_last_28d, so it lives
+// on the composite source in index.malloy.
+
+source: inventory_items_base is the_look_bq.table('bigquery-public-data.thelook_ecommerce.inventory_items') extend {
+  primary_key: id
+
+  dimension: is_sold is sold_at is not null
+
+  #" days between created and sold date
+  dimension: days_in_inventory is days(created_at to coalesce(sold_at, now))
+
+  // LookML tier, style: integer, tiers [0, 5, 10, 20, 40, 80, 160, 360]
+  dimension: days_in_inventory_tier is
+    pick '000 to 004' when days_in_inventory < 5
+    pick '005 to 009' when days_in_inventory < 10
+    pick '010 to 019' when days_in_inventory < 20
+    pick '020 to 039' when days_in_inventory < 40
+    pick '040 to 079' when days_in_inventory < 80
+    pick '080 to 159' when days_in_inventory < 160
+    pick '160 to 359' when days_in_inventory < 360
+    else '360 or Above'
+
+  #" days since created - useful when filtering on sold yesno for items still in inventory
+  dimension: days_since_arrival is days(created_at to now)
+
+  dimension: days_since_arrival_tier is
+    pick '000 to 004' when days_since_arrival < 5
+    pick '005 to 009' when days_since_arrival < 10
+    pick '010 to 019' when days_since_arrival < 20
+    pick '020 to 039' when days_since_arrival < 40
+    pick '040 to 079' when days_since_arrival < 80
+    pick '080 to 159' when days_since_arrival < 160
+    pick '160 to 359' when days_since_arrival < 360
+    else '360 or Above'
+
+  //////////// Measures ////////////
+
+  measure: inventory_item_count is count()
+
+  measure: sold_count is count() { where: is_sold }
+
+  measure: number_on_hand is count() { where: not is_sold }
+
+  # percent
+  measure: sold_percent is sold_count / nullif(inventory_item_count, 0)
+
+  # currency
+  measure:
+    total_cost is sum(cost)
+    average_cost is avg(cost)
+
+  //////////// LookML `set: detail` -> a view ////////////
+
+  view: detail is {
+    group_by:
+      id
+      cost
+      created_time is created_at
+      sold_time is sold_at
+  }
+}

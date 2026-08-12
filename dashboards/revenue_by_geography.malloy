@@ -1,0 +1,41 @@
+// dashboards/revenue_by_geography.malloy
+// The post's financial metrics: revenue by country, average revenue per customer,
+// and where the spend differs by region.
+//
+// The post also lists "discount analysis". theLook has no discount data -- sale_price
+// equals products.retail_price on all 180,485 order items -- so there is nothing to
+// analyse and no tile pretends otherwise. Margin (sale price vs inventory cost) is
+// the nearest real profitability signal and is shown instead.
+
+##! experimental { givens }
+
+import "../givens.malloy"
+
+#" Revenue, margin and spend per customer, by country and region.
+# artifact { title="Revenue & Spend by Geography" } dashboard {columns=6}
+query: revenue_by_geography is order_items -> {
+  where:
+    created_at ~ $PERIOD,
+    users.country_name ~ $COUNTRY,
+    products.brand_name ~ $BRAND,
+    products.category_name ~ $CATEGORY
+
+  # colspan=2
+  aggregate:
+    total_sale_price
+    lifetime_value
+    customer_count
+    total_gross_margin
+    total_gross_margin_percentage
+    average_order_value
+
+  # colspan=3
+  nest:
+    # break
+    revenue_by_country
+    revenue_by_state
+    top_brands
+    top_categories
+    # colspan=6
+    revenue_by_month
+}

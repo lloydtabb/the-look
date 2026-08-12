@@ -1,0 +1,16 @@
+// distribution_centers_base.malloy
+// Malloy translation of LookML view: distribution_centers
+// (views/05_distribution_centers.view.lkml)
+
+source: distribution_centers_base is
+  the_look_bq.table('bigquery-public-data.thelook_ecommerce.distribution_centers') extend {
+    primary_key: id
+
+    // LookML `location` was a lat/long pair; Malloy keeps them as a formatted string
+    // alongside the raw latitude / longitude columns.
+    dimension: location is concat(latitude::string, ', ', longitude::string)
+
+    dimension: distribution_center_name is name
+
+    measure: distribution_center_count is count()
+  }

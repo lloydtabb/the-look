@@ -1,0 +1,37 @@
+// dashboards/customer_value.malloy
+// The post's customer metrics: retention / repeat purchase rate, lifetime value,
+// and segmentation by behaviour.
+
+##! experimental { givens }
+
+import "../givens.malloy"
+
+#" Who comes back, what they're worth, and how the customer base splits.
+# artifact { title="Customer Retention & Lifetime Value" } dashboard {columns=6}
+query: customer_value is order_items -> {
+  where:
+    created_at ~ $PERIOD,
+    users.country_name ~ $COUNTRY,
+    users.traffic_source ~ $TRAFFIC_SOURCE
+
+  # colspan=2
+  aggregate:
+    customer_count
+    repeat_rate
+    lifetime_value
+    average_order_value
+    orders_per_customer
+    order_count
+
+  # colspan=3
+  nest:
+    # break
+    customers_by_lifetime_orders
+    customers_by_spend_tier
+    revenue_by_traffic_source
+    revenue_by_age_and_gender
+    # colspan=6
+    cohort_value_by_signup_month
+    # colspan=6
+    orders_by_months_since_signup
+}

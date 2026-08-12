@@ -1,0 +1,263 @@
+// index.malloy -- the published query surface.
+//
+// Malloy translation of the LookML explore `order_items`
+// (models/looker_developer_guide.model.lkml, label "(1) Orders, Items and Users").
+//
+// A LookML explore is a base view plus a join graph plus the cross-view fields that
+// only make sense once those joins exist. That is exactly a Malloy composite source:
+// the basic sources are imported unchanged, joined here, and then extended with the
+// fields LookML could only define at explore scope.
+
+import "order_items_base.malloy"
+import "users_base.malloy"
+import "inventory_items_base.malloy"
+import "products_base.malloy"
+import "distribution_centers_base.malloy"
+import "order_facts_base.malloy"
+import "events_base.malloy"
+
+#" (1) Orders, Items and Users
+source: order_items is order_items_base extend {
+
+  //////////// The explore's join graph ////////////
+  // Every Malloy join is a left outer join. LookML declared inventory_items as
+  // `full_outer`; here it is a left join from order_items, so unsold inventory
+  // rows are reachable through the `inventory_items` source rather than through
+  // this explore.
+
+  join_one: order_facts is order_facts_base
+    on order_id = order_facts.order_id
+
+  join_one: inventory_items is inventory_items_base
+    on inventory_item_id = inventory_items.id
+
+  join_one: users is users_base
+    on user_id = users.id
+
+  join_one: products is products_base
+    on inventory_items.product_id = products.id
+
+  join_one: distribution_centers is distribution_centers_base
+    on inventory_items.product_distribution_center_id = distribution_centers.id
+
+  //////////// Cross-view dimensions ////////////
+
+  // LookML order_items.months_since_signup (needs users.created)
+  dimension: months_since_signup is
+    floor(days(users.created_at to created_at) / 30)
+
+  // LookML order_items.gross_margin (needs inventory_items.cost)
+  # currency
+  dimension: gross_margin is sale_price - inventory_items.cost
+
+  # percent
+  dimension: item_gross_margin_percentage is
+    gross_margin / nullif(sale_price, 0)
+
+  // LookML tier, style: interval, tiers [0, 10, ... 90] over the percentage * 100
+  dimension: item_gross_margin_percentage_tier is
+    pick 'Below 0%' when item_gross_margin_percentage * 100 < 0
+    pick '0% to 10%' when item_gross_margin_percentage * 100 < 10
+    pick '10% to 20%' when item_gross_margin_percentage * 100 < 20
+    pick '20% to 30%' when item_gross_margin_percentage * 100 < 30
+    pick '30% to 40%' when item_gross_margin_percentage * 100 < 40
+    pick '40% to 50%' when item_gross_margin_percentage * 100 < 50
+    pick '50% to 60%' when item_gross_margin_percentage * 100 < 60
+    pick '60% to 70%' when item_gross_margin_percentage * 100 < 70
+    pick '70% to 80%' when item_gross_margin_percentage * 100 < 80
+    pick '80% to 90%' when item_gross_margin_percentage * 100 < 90
+    else '90% or Above'
+
+  //////////// Cross-view measures ////////////
+
+  # currency
+  measure:
+    total_gross_margin is source.sum(gross_margin)
+    average_gross_margin is source.avg(gross_margin)
+
+  # percent
+  measure: total_gross_margin_percentage is
+    total_gross_margin / nullif(total_sale_price, 0)
+
+  # currency
+  measure: average_spend_per_user is
+    total_sale_price / nullif(users.user_count, 0)
+
+  // LookML order_items.first_purchase_count (needs order_facts.is_first_purchase)
+  measure: first_purchase_count is
+    count(order_id) { where: order_facts.is_first_purchase }
+
+  // LookML inventory_items.stock_coverage_ratio (needs order_items.count_last_28d)
+  #" Stock on Hand vs Trailing 28d Sales Ratio
+  measure: stock_coverage_ratio is
+    inventory_items.number_on_hand / nullif(count_last_28d * 20.0, 0)
+
+  //////////////////////////////////////////////////////////////////////////
+  // Beyond the LookML: customer / campaign KPIs for the dashboards
+  //////////////////////////////////////////////////////////////////////////
+
+  measure: customer_count is users.user_count
+
+  #" Customers who placed more than one order
+  measure: repeat_customer_count is
+    count(users.id) { where: order_facts.order_sequence_number > 1 }
+
+  # percent
+  #" Share of customers who ever came back for a second order
+  measure: repeat_rate is repeat_customer_count / nullif(customer_count, 0)
+
+  # currency
+  #" Lifetime revenue per customer (this dataset has no cost of acquisition)
+  measure: lifetime_value is total_sale_price / nullif(customer_count, 0)
+
+  measure: orders_per_customer is order_count / nullif(customer_count, 0)
+
+  # currency
+  measure: average_order_value is
+    total_sale_price / nullif(order_count, 0)
+
+  //////////// Geography ////////////
+
+  # bar_chart { x=country y=total_sale_price }
+  view: revenue_by_country is {
+    group_by: country is users.country_name
+    aggregate: total_sale_price, customer_count, lifetime_value, order_count
+    order_by: total_sale_price desc
+  }
+
+  # shape_map
+  view: revenue_by_state is {
+    group_by: state is users.state
+    aggregate: total_sale_price
+    where: users.country_name = 'United States'
+    order_by: total_sale_price desc
+  }
+
+  //////////// Trend and mix ////////////
+
+  // Cut the partial current month -- see the note in events_base.sessions_by_month.
+  # line_chart { x=order_month y=total_sale_price }
+  view: revenue_by_month is {
+    group_by: order_month is created_at.month
+    aggregate: total_sale_price, order_count, average_order_value
+    where: created_at < now.month
+    order_by: order_month asc
+  }
+
+  # bar_chart { x=traffic_source y=total_sale_price }
+  view: revenue_by_traffic_source is {
+    group_by: traffic_source is users.traffic_source
+    aggregate: total_sale_price, customer_count, lifetime_value, repeat_rate
+    order_by: total_sale_price desc
+  }
+
+  # bar_chart { x=brand y=total_gross_margin }
+  view: top_brands is {
+    group_by: brand is products.brand_name
+    aggregate: total_sale_price, total_gross_margin, total_gross_margin_percentage
+    order_by: total_gross_margin desc
+    limit: 15
+  }
+
+  # bar_chart { x=category y=total_sale_price }
+  view: top_categories is {
+    group_by: category is products.category_name
+    aggregate: total_sale_price, order_item_count, return_rate
+    order_by: total_sale_price desc
+    limit: 15
+  }
+
+  //////////// Customer behaviour ////////////
+
+  // Two stages: roll up to one row per customer, then bucket the customers.
+  # bar_chart { x=lifetime_orders y=customers }
+  view: customers_by_lifetime_orders is {
+    group_by: customer is user_id
+    aggregate: orders is order_count
+  } -> {
+    group_by: lifetime_orders is
+      pick '1 order' when orders = 1
+      pick '2 orders' when orders = 2
+      pick '3 to 5 orders' when orders <= 5
+      else '6+ orders'
+    aggregate: customers is count()
+    order_by: lifetime_orders asc
+  }
+
+  # bar_chart { x=spend_tier y=customers }
+  view: customers_by_spend_tier is {
+    group_by: customer is user_id
+    aggregate: spend is total_sale_price
+  } -> {
+    group_by: spend_tier is
+      pick '1 under $50' when spend < 50
+      pick '2 $50 to $100' when spend < 100
+      pick '3 $100 to $250' when spend < 250
+      pick '4 $250 to $500' when spend < 500
+      else '5 $500+'
+    aggregate: customers is count(), revenue is spend.sum()
+    order_by: spend_tier asc
+  }
+
+  # bar_chart { x=age_tier y=total_sale_price series=gender }
+  view: revenue_by_age_and_gender is {
+    group_by: age_tier is users.age_tier, gender is users.gender
+    aggregate: total_sale_price
+    order_by: age_tier asc
+  }
+
+  // Signup-month cohorts: how much each cohort has spent since joining.
+  # line_chart { x=signup_month y=lifetime_value }
+  view: cohort_value_by_signup_month is {
+    group_by: signup_month is users.created_at.month
+    aggregate: customer_count, lifetime_value, repeat_rate, total_sale_price
+    where: users.created_at < now.month
+    order_by: signup_month asc
+  }
+
+  #" Orders placed N months after the customer signed up
+  # line_chart { x=months_since_signup y=order_count }
+  view: orders_by_months_since_signup is {
+    group_by: months_since_signup
+    aggregate: order_count, total_sale_price
+    where: months_since_signup >= 0 and months_since_signup <= 24
+    order_by: months_since_signup asc
+  }
+
+  //////////// LookML `set: detail` -> a view ////////////
+
+  view: detail is {
+    group_by:
+      order_id
+      status
+      created_date is created_at.day
+      sale_price
+      brand is products.brand_name
+      item_name is products.item_name
+      user_portrait is users.user_image
+      user_name is users.name
+      user_email is users.email
+  }
+
+  view: return_detail is {
+    group_by:
+      id
+      order_id
+      status
+      created_date is created_at.day
+      returned_date is returned_at.day
+      sale_price
+      brand is products.brand_name
+      item_name is products.item_name
+      user_portrait is users.user_image
+      user_name is users.name
+      user_email is users.email
+  }
+}
+
+// Session-level web analytics. Not in the LookML -- see events_base.malloy.
+source: events is events_base extend {
+  join_one: users is users_base on user_id = users.id
+}
+
+export { order_items, events }

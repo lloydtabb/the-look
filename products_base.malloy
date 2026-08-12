@@ -1,0 +1,34 @@
+// products_base.malloy
+// Malloy translation of LookML view: products (views/04_products.view.lkml)
+
+source: products_base is the_look_bq.table('bigquery-public-data.thelook_ecommerce.products') extend {
+  primary_key: id
+
+  //////////// Dimensions ////////////
+
+  dimension: category_name is trim(category)
+
+  dimension: item_name is trim(name)
+
+  // LookML attached a "Website" link to brand
+  # link { url_template="http://www.google.com/search?q=$$+clothes&btnI" }
+  dimension: brand_name is trim(brand)
+
+  dimension: department_name is trim(department)
+
+  //////////// Measures ////////////
+
+  measure: product_count is count()
+
+  measure:
+    brand_count is count(brand_name)
+    category_count is count(category_name)
+    department_count is count(department_name)
+
+  //////////// LookML `set: detail` -> a view ////////////
+
+  view: detail is {
+    group_by: id, item_name, brand_name, category_name, department_name, retail_price
+    aggregate: product_count
+  }
+}

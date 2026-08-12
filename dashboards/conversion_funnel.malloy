@@ -1,0 +1,39 @@
+// dashboards/conversion_funnel.malloy
+// The post's funnel metrics: home -> product -> cart -> purchase, conversion rate,
+// add-to-cart rate. Built on the events table.
+//
+// Reality check baked into the model: every session in this dataset has a `product`
+// event but only 87,873 of 680,485 have a `home` event, so home/department are entry
+// variants rather than stages above product. The funnel chart shows the three stages
+// that actually decrease; entry pages get their own tile.
+
+##! experimental { givens }
+
+import "../givens.malloy"
+
+#" Where sessions drop out between viewing a product, adding to cart, and buying.
+# artifact { title="Conversion Funnel" } dashboard {columns=6}
+query: conversion_funnel is events -> {
+  where:
+    created_at ~ $PERIOD,
+    traffic_source ~ $TRAFFIC_SOURCE
+
+  # colspan=2
+  aggregate:
+    session_count
+    conversion_rate
+    add_to_cart_rate
+    cart_to_purchase_rate
+    cart_abandon_rate
+    purchase_sessions
+
+  # colspan=3
+  nest:
+    # break
+    funnel
+    entry_pages
+    by_traffic_source
+    by_browser
+    # colspan=6
+    sessions_by_month
+}

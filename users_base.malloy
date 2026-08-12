@@ -1,0 +1,86 @@
+// users_base.malloy
+// Malloy translation of LookML view: users (views/02_users.view.lkml)
+//
+// Note: the LookML referenced ${TABLE}.zip, but the BigQuery table's column is
+// `postal_code` -- the dimension keeps the LookML name and points at the real column.
+
+source: users_base is the_look_bq.table('bigquery-public-data.thelook_ecommerce.users') extend {
+  primary_key: id
+
+  //////////// Demographics ////////////
+
+  dimension:
+    // LookML proper-cases the raw name columns
+    name_first is concat(upper(substr(first_name, 1, 1)), lower(substr(first_name, 2)))
+    name_last is concat(upper(substr(last_name, 1, 1)), lower(substr(last_name, 2)))
+
+  dimension: name is concat(name_first, ' ', name_last)
+
+  dimension: over_21 is age > 21
+
+  // LookML tier, style: integer
+  dimension: age_tier is
+    pick '00 to 09' when age < 10
+    pick '10 to 19' when age < 20
+    pick '20 to 29' when age < 30
+    pick '30 to 39' when age < 40
+    pick '40 to 49' when age < 50
+    pick '50 to 59' when age < 60
+    pick '60 to 69' when age < 70
+    else '70 or Above'
+
+  dimension: gender_short is lower(substr(gender, 1, 1))
+
+  dimension: image_file is
+    concat('https://docs.looker.com/assets/images/', gender_short, '.jpg')
+
+  // LookML rendered this with an <img> html block
+  # image { url_template="$$" width="220" height="220" }
+  dimension: user_image is image_file
+
+  //////////// Geography ////////////
+
+  dimension: zip is postal_code
+
+  dimension: uk_postcode is
+    pick replace(postal_code, r'[0-9]', '') when country = 'UK'
+    else null::string
+
+  // LookML folded 'UK' into 'United Kingdom'. The same table also carries
+  // 'España' and 'Deutschland' as separate countries from Spain and Germany --
+  // same problem, so they get folded the same way.
+  dimension: country_name is
+    pick 'United Kingdom' when country = 'UK'
+    pick 'Spain' when country = 'España'
+    pick 'Germany' when country = 'Deutschland'
+    else country
+
+  dimension:
+    approx_latitude is round(latitude, 1)
+    approx_longitude is round(longitude, 1)
+
+  //////////// Other User Information ////////////
+
+  // LookML `ssn` / `ssn_last_4`: four random digits, a stand-in for masked data.
+  # hidden
+  dimension: ssn is concat(
+    floor(10 * rand())::string, floor(10 * rand())::string,
+    floor(10 * rand())::string, floor(10 * rand())::string
+  )
+
+  #" Only users with sufficient permissions will see this data
+  dimension: ssn_last_4 is ssn
+
+  //////////// Measures ////////////
+
+  measure: user_count is count()
+
+  measure: average_age is avg(age)
+
+  //////////// LookML `set: detail` -> a view ////////////
+
+  view: detail is {
+    group_by: id, name, email, age, created_date is created_at.day
+    aggregate: user_count
+  }
+}

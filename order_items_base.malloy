@@ -1,0 +1,81 @@
+// order_items_base.malloy
+// Malloy translation of LookML view: order_items (views/01_order_items.view.lkml)
+//
+// A "basic source": only what is intrinsic to the order_items table.
+// LookML fields that reach across views -- gross margin (needs inventory_items.cost),
+// months_since_signup (needs users.created), average_spend_per_user (needs users.count),
+// first_purchase_count (needs order_facts.is_first_purchase) -- are defined on the
+// composite source in index.malloy.
+
+source: order_items_base is the_look_bq.table('bigquery-public-data.thelook_ecommerce.order_items') extend {
+  primary_key: id
+
+  // IDs / foreign keys (id, order_id, user_id, product_id, inventory_item_id)
+  // come through from the table as-is.
+
+  //////////// Time Dimensions ////////////
+  // LookML dimension_groups. Malloy truncates any timestamp inline
+  // (`created_at.month`, `created_at.week`), so only the extraction-style
+  // timeframes LookML spelled out need their own names.
+
+  dimension:
+    created_hour_of_day is hour(created_at)
+    created_day_of_week is day_of_week(created_at)
+    created_month_num is month(created_at)
+    created_month_name is created_at.month::string
+    created_week_of_year is week(created_at)
+
+  // LookML: reporting_period
+  dimension: reporting_period is
+    pick 'This Year to Date'
+      when year(created_at) = year(now) and created_at < now
+    pick 'Last Year to Date'
+      when year(created_at) + 1 = year(now)
+        and day_of_year(created_at) <= day_of_year(now)
+    else null
+
+  // LookML wrote TIMESTAMP_DIFF(created, now) -- negative -- which contradicts
+  // the field name. Oriented here so "days since sold" counts up from the sale.
+  dimension: days_since_sold is days(created_at to now)
+
+  //////////// Logistics ////////////
+
+  dimension: days_to_process is
+    pick days(created_at to now) * 1.0 when status = 'Processing'
+    pick days(created_at to shipped_at) * 1.0
+      when status ? 'Shipped' | 'Complete' | 'Returned'
+    else null
+
+  dimension: shipping_time is days(shipped_at to delivered_at) * 1.0
+
+  //////////// Return Information ////////////
+
+  dimension: is_returned is returned_at is not null
+
+  //////////// Measures ////////////
+
+  measure: order_item_count is count()
+
+  // LookML count_last_28d: distinct order items sold in the trailing 28 days.
+  measure: count_last_28d is count(id) { where: created_at > now - 28 days }
+
+  measure: order_count is count(order_id)
+
+  # currency
+  measure:
+    total_sale_price is sum(sale_price)
+    average_sale_price is avg(sale_price)
+    returned_total_sale_price is sum(sale_price) { where: is_returned }
+
+  measure:
+    average_days_to_process is avg(days_to_process)
+    average_shipping_time is avg(shipping_time)
+
+  measure: returned_count is count(id) { where: is_returned }
+
+  # percent
+  measure: return_rate is returned_count / nullif(order_item_count, 0)
+
+  // LookML's `set: detail` / `set: return_detail` list fields from products and
+  // users, so they land on the composite source in index.malloy.
+}
